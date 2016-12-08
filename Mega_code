@@ -1,0 +1,160 @@
+#include<SPI.h>
+#include<SdFat.h>
+SdFat  sd;
+SdFile myFile;
+const int irinterrupt = 2;// external interrupt pin 
+const int serialdata1 = 22;// pa0
+const int serialdata2 = 23;// pa1
+const int serialdata3 = 24;// pa2
+const int serialdata4 = 25;// pa3
+const int serialdata5 = 26;// pa4
+const int serialdata6 = 27;// pa5
+const int serialdata7 = 28;// pa6
+const int serialdata8 = 29;// pa7
+const int serialdata9 = 37;// pc0
+const int serialdata10= 36;// pc1
+const int serialdata11= 35;// pc2
+const int serialdata12= 34;// pc3
+const int inputclock  = 6;//  ph3
+const int latchdata   = 7;//  ph4
+const int cleardata   = 8;//active low ph5
+const int outputenable= 9;//active low ph6
+volatile unsigned int overflowcount=0;
+char character[192];
+int buffptr;
+unsigned int var1;// bitbanging for serialdata1
+unsigned int var2;// bitbanging for serialdata2
+unsigned int var3;// bitbanging for serialdata3
+unsigned int var4;// bitbanging for serialdata4
+unsigned int var5;// bitbanging for serialdata5
+unsigned int var6;// bitbanging for serialdata6
+unsigned int var7;// bitbanging for serialdata7
+unsigned int var8;// bitbanging for serialdata8
+unsigned int var9;// bitbanging for serialdata9
+unsigned int var10;//bitbanging for serialdata10
+unsigned int var11;//bitbanging for serialdata11
+unsigned int var12;//bitbanging for serialdata12   
+unsigned int input1;//bitbanging into portA
+unsigned int input2;//bitbanging into portc
+volatile int dataflag=0; 
+
+void setup(){
+     Serial.begin(9600);
+     if(!sd.begin(4, SPI_FULL_SPEED)){
+      return;
+      Serial.println("prob");
+  }
+  Serial.println("sok");
+  pinMode(irinterrupt,INPUT_PULLUP);
+  pinMode(serialdata1, OUTPUT);
+  pinMode(serialdata2, OUTPUT);
+  pinMode(serialdata3, OUTPUT);
+  pinMode(serialdata4, OUTPUT);
+  pinMode(serialdata5, OUTPUT);
+  pinMode(serialdata6, OUTPUT);
+  pinMode(serialdata7, OUTPUT);
+  pinMode(serialdata8, OUTPUT);
+  pinMode(serialdata9, OUTPUT);
+  pinMode(serialdata10, OUTPUT);
+  pinMode(serialdata11, OUTPUT);
+  pinMode(serialdata12, OUTPUT);
+  pinMode(inputclock,  OUTPUT);
+  pinMode(latchdata,   OUTPUT);
+  pinMode(cleardata,   OUTPUT);
+  pinMode(outputenable,OUTPUT);
+  digitalWrite(inputclock, LOW);
+  digitalWrite(latchdata, LOW);
+  //clearing the data
+  digitalWrite(cleardata, LOW);
+  digitalWrite(cleardata, HIGH);
+  //enabling the output
+  digitalWrite(outputenable,LOW);
+  //attaching the ir interrupt
+  attachInterrupt(digitalPinToInterrupt(irinterrupt),IRISR,RISING);
+  // setting the timer1(16 bit) for calculating the time for latching data
+   TCCR1A=B00000000;// First two bits- set OC0A on compare match
+                   // bit 5 and 4- toggle OC0B on compare match for giving GSCLK signal
+                   // Last two bits- CTC mode, TOP=OCRA
+  TCCR1B=B00001001;// Prescalar=1, freq= 16 MHz , GSCLK freq= 16MHz
+  OCR1AH=B11111111;// initialise to a high value
+  OCR1AL=B11111111;
+  TIMSK1=B00000010;// Compare match A interrupt enabled, B disabled
+  // setting the timer2(8 bit) calculating the rotation time
+   TCCR2A=B00000000;// 8 bit Timer/Clock for getting time for one rotation
+  TCCR2B=B00000010;// Prescalar=8 Freq= 2 MHz
+  TIMSK2=B00000001;// Set for overflow interrupt
+  TCNT1=0;
+  TCNT2=0; 
+   myFile.open("test.txt", O_READ);//opening the file 
+}
+
+void loop(){
+  if(dataflag==1){
+   if(myFile.read(character,192)==192){
+   for(buffptr=0;buffptr<16;buffptr++){
+     var1=character[buffptr]-48;
+     var2=character[buffptr+16]-48;
+     var3=character[buffptr+32]-48;
+     var4=character[buffptr+48]-48;
+     var5=character[buffptr+64]-48;
+     var6=character[buffptr+80]-48;
+     var7=character[buffptr+96]-48;
+     var8=character[buffptr+112]-48;
+     var9=character[buffptr+128]-48;
+     var10=character[buffptr+144]-48;
+     var11=character[buffptr+160]-48;
+     var12=character[buffptr+176]-48;
+     var2=var2<<1;
+     var3=var3<<2;
+     var4=var4<<3;
+     var5=var5<<4;
+     var6=var6<<5;
+     var7=var7<<6;
+     var8=var8<<7;
+     input1=var1+var2+var3+var4+var5+var6+var7+var8;
+     var10=var10<<1;
+     var11=var11<<2;
+     var12=var12<<3;
+     input2=var9+var10+var11+var12;
+     PORTA&= ~(0XFF);
+     PORTC&= ~(0X0F);
+     PORTA|= input1;
+     PORTC|= input2;
+     PORTH|=  0X08;//pulling up the input clock
+     PORTH&= ~(0X08);// pulling low the input clock
+      
+   }
+    dataflag=0;
+  
+  
+  }
+  else{
+    myFile.rewind();
+    dataflag=0;
+  }
+  }
+  
+}
+
+
+void IRISR(){
+  cli();// stop interrupts
+   OCR1A = (256*overflowcount+TCNT2)*8/200 + 1;// setting the campare value for the latching timer
+   TCNT1=0;
+   TCNT2=0;
+   overflowcount=0;
+   sei(); //allow interrupts
+  
+}
+
+ISR(TIMER2_OVF_vect){
+  overflowcount++;
+}
+ISR(TIMER1_COMPA_vect){
+  PORTH |= 0X20;// latching the data
+  PORTH &= ~(0X20);
+  dataflag=1;
+  Serial.println("I");   
+}
+
+
